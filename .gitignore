@@ -1,3 +1,5 @@
+.gradio/
+outputs/
 temp/
 experiments/
 log/

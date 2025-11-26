@@ -1,0 +1,8 @@
+gradio>=4.0.0
+numpy>=1.24.0
+Pillow>=10.0.0
+PyYAML>=6.0.0
+easydict>=1.10
+imageio>=2.31.0
+torch>=2.1.0
+torchvision>=0.16.0
