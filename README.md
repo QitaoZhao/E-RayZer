@@ -50,11 +50,11 @@ python gradio_app.py \
 If you use E-RayZer in academic or industrial research, please cite:
 
 ```bibtex
-@misc{zhao2026erayzer,
-	title     = {E-RayZer: Self-supervised 3D Reconstruction as Spatial Visual Pre-training},
-	author    = {Qitao Zhao and Hao Tan and Qianqian Wang and Sai Bi and Kai Zhang and Kalyan Sunkavalli and Shubham Tulsiani and Hanwen Jiang},
-	note      = {arXiv preprint arXiv:2512.10950},
-    year      = {2025}
+@misc{zhao2025erayzer,
+	title  = {E-RayZer: Self-supervised 3D Reconstruction as Spatial Visual Pre-training},
+	author = {Qitao Zhao and Hao Tan and Qianqian Wang and Sai Bi and Kai Zhang and Kalyan Sunkavalli and Shubham Tulsiani and Hanwen Jiang},
+	note   = {arXiv preprint arXiv:2512.10950},
+    year   = {2025}
 }
 ```
 
