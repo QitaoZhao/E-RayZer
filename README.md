@@ -58,6 +58,9 @@ If you use E-RayZer in academic or industrial research, please cite:
 }
 ```
 
+## Related Project
+This project is inspired by and builds upon [RayZer](https://hwjiang1510.github.io/RayZer/). We strongly encourage readers to check it out if you haven’t already.
+
 ## Acknowledgements & License
 - Model weights (and related assets) are Copyright 2025 Adobe Inc. and are distributed under the Adobe Research License.
 - This work was partially done at Adobe Research, where Qitao Zhao worked as a Research Scientist Intern.
