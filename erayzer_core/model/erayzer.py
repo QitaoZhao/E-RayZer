@@ -121,8 +121,7 @@ class ERayZer(nn.Module):
         self.d_head = self.config.model.transformer.d_head
         self.hh = self.ww = self.config.model.image_tokenizer.image_size // self.config.model.image_tokenizer.patch_size
         self.ph = self.pw = self.config.model.image_tokenizer.patch_size
-        self.inference = True 
-        self.target_has_input = self.config.training.get('target_has_input', False)
+        self.inference = True
  
         # image tokenizer
         self.image_tokenizer = nn.Sequential(

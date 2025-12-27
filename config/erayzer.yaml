@@ -87,7 +87,6 @@ training:
   resume_ckpt: none
   single_scene_overfit: false
   square_crop: true
-  target_has_input: false
   torch_compile: false
   use_amp: true
   use_gt_intrinsics: false
