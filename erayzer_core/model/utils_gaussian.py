@@ -109,8 +109,6 @@ def get_point_range_func(gaussians_config):
         "range_setting", edict({"type": "object_centric_depth"})
     )
 
-    print("range_setting: ", range_setting)
-
     if range_setting.type == "object_centric_depth":
         rangefunc = lambda t : (2.0 * torch.sigmoid(t) - 1.0) * 1.5 + 2.7
         return rangefunc

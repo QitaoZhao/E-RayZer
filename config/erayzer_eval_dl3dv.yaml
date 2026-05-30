@@ -1,0 +1,80 @@
+debug: false
+inference: false
+inference_view_selector_type: even_I_B
+profile: false
+
+dataset:
+  name: dl3dv
+  eval_manifest_path: data/dl3dv_release/manifests/test_full.txt
+  covisibility_root: data/dl3dv_release/covisibility/dl3dv
+
+model:
+  class_name: erayzer_core.model.erayzer.ERayZer
+  image_tokenizer:
+    image_size: 256
+    patch_size: 16
+    in_channels: 3
+    use_off_the_shelf: false
+  input_with_pe: true
+  target_image:
+    height: 256
+    width: 256
+  transformer:
+    d: 768
+    d_head: 64
+    encoder_n_layer: 16
+    encoder_geom_n_layer: 16
+    decoder_n_layer: 8
+    neck_n_layer: 1
+    fix_decoder: false
+    special_init: true
+    depth_init: true
+    use_qk_norm: true
+  pose_latent:
+    length: 1
+    canonical: middle
+    mode: pairwise
+  use_deferred_rendering: false
+  use_gsplat: true
+  near_plane: 0.2
+  scaling_bias: -3.0
+  scaling_max: -2.0
+  gaussians:
+    n_gaussians: 1
+    range_setting:
+      far: 8
+      near: 0
+      type: linear_depth
+    sh_degree: 3
+    upsampler:
+      upsample_factor: 1
+  gs_per_pixel_sqrt: 1
+  hard_pixelalign: true
+
+training:
+  dataset: dl3dv
+  batch_size_per_gpu: 1
+  num_workers: 2
+  grad_checkpoint_every: 1
+  num_views: 10
+  num_all_views: 10
+  num_input_views: 5
+  num_target_views: 5
+  center_crop: true
+  random_shuffle: false
+  random_split: true
+  max_resample_tries: 1
+  view_selector:
+    type: two_frame
+    min_frame_dist: 96
+    max_frame_dist: 96
+    use_curriculum: false
+  use_amp: true
+  amp_dtype: bf16
+  use_tf32: true
+
+evaluation:
+  checkpoint_path: checkpoints/erayzer_dl3dv.pt
+  out_dir: experiments/evaluation/erayzer-dl3dv
+  max_batches: 0
+  save_examples: 8

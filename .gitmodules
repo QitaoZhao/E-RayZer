@@ -1,4 +1,4 @@
 [submodule "third_party/gsplat"]
 	path = third_party/gsplat
-	url = git@github.com:QitaoZhao/gsplat.git
+	url = https://github.com/QitaoZhao/gsplat.git
 	branch = v1.4.0-working

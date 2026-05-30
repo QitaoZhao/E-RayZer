@@ -11,17 +11,17 @@ from urllib.parse import urlparse
 import gradio as gr
 import numpy as np
 import torch
+import yaml
 from PIL import Image
 from huggingface_hub import hf_hub_download
 
 from app_core.engine import get_engine
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_CONFIG = os.path.join(THIS_DIR, "config", "erayzer.yaml")
-DEFAULT_OUTPUT_ROOT = os.path.join(THIS_DIR, "outputs")
+DEFAULT_CONFIG = os.path.join(THIS_DIR, "config", "erayzer_inference.yaml")
+DEFAULT_OUTPUT_ROOT = os.path.join(THIS_DIR, "experiments", "inference", "erayzer")
 EXAMPLES_DIR = os.path.join(THIS_DIR, "examples")
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
-
 HF_REPO_ID = "qitaoz/E-RayZer"
 HF_REVISION = "main"
 HF_CKPT_FILENAME = "checkpoints/erayzer_multi.pt"
@@ -89,6 +89,15 @@ def _resolve_checkpoint_path(ckpt_arg: Optional[str]) -> str:
         existing = _maybe_existing_checkpoint(ckpt_arg)
         if existing:
             return existing
+        default_candidates = {
+            DEFAULT_LOCAL_CKPT,
+            os.path.relpath(DEFAULT_LOCAL_CKPT, THIS_DIR),
+            HF_CKPT_FILENAME,
+        }
+        if os.path.normpath(os.path.expanduser(ckpt_arg)) in {
+            os.path.normpath(candidate) for candidate in default_candidates
+        }:
+            return _get_default_checkpoint()
         if _is_hf_url(ckpt_arg):
             repo_id, revision, file_path = _parse_hf_url(ckpt_arg)
             return hf_hub_download(repo_id=repo_id, filename=file_path, revision=revision)
@@ -160,6 +169,37 @@ def _load_gallery(paths: Sequence[str]) -> List[np.ndarray]:
     return [_load_image(path) for path in paths]
 
 
+def _load_yaml(path: str) -> Dict[str, object]:
+    with open(path, "r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def _resolve_config_path(config_path: str, value: Optional[str], fallback: str) -> str:
+    path = value or fallback
+    if os.path.isabs(path):
+        return path
+    repo_root = os.path.dirname(os.path.abspath(config_path))
+    if os.path.basename(repo_root) == "config":
+        repo_root = os.path.dirname(repo_root)
+    return os.path.normpath(os.path.join(repo_root, path))
+
+
+def _default_paths_for_config(config_path: str) -> Tuple[str, str]:
+    config = _load_yaml(config_path)
+    return (
+        _resolve_config_path(
+            config_path,
+            config.get("inference_checkpoint_path"),
+            DEFAULT_CKPT,
+        ),
+        _resolve_config_path(
+            config_path,
+            config.get("inference_out_dir"),
+            DEFAULT_OUTPUT_ROOT,
+        ),
+    )
+
+
 def preprocess(
     output_root: str,
     image_block: Sequence[object],
@@ -225,13 +265,19 @@ def build_demo(args) -> gr.Blocks:
     global EXAMPLES_LIST, EXAMPLES_FULL
     EXAMPLES_LIST, EXAMPLES_FULL = _discover_examples(EXAMPLES_DIR)
 
+    config_path = args.config or DEFAULT_CONFIG
+    config = _load_yaml(config_path)
     inferred_device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
     ckpt_path = _resolve_checkpoint_path(args.ckpt)
     defaults = {
-        "config": args.config or DEFAULT_CONFIG,
+        "config": config_path,
         "ckpt": ckpt_path,
         "device": inferred_device,
-        "output_dir": args.output_dir or DEFAULT_OUTPUT_ROOT,
+        "output_dir": args.output_dir or _resolve_config_path(
+            config_path,
+            config.get("inference_out_dir"),
+            DEFAULT_OUTPUT_ROOT,
+        ),
     }
 
     preprocess_fn = functools.partial(preprocess, defaults["output_dir"])
@@ -240,10 +286,10 @@ def build_demo(args) -> gr.Blocks:
     _TITLE = "E-RayZer: Self-supervised 3D Reconstruction as Spatial Visual Pre-training"
     _DESCRIPTION = """
     <div>
-    <a style="display:inline-block" href="https://qitaozhao.github.io/E-RayZer"><img src='https://img.shields.io/badge/public_website-8A2BE2'></a>
+    <a style="display:inline-block" href="https://qitaozhao.github.io/E-RayZer"><img src='https://img.shields.io/badge/project_page-8A2BE2'></a>
     <a style="display:inline-block; margin-left: .5em" href='https://github.com/QitaoZhao/E-RayZer'><img src='https://img.shields.io/github/stars/QitaoZhao/E-RayZer?style=social'/></a>
     </div>
-    E-RayZer, a self-supervised 3D Vision model predicting camera poses and scene geometry as 3D Gaussians.
+    E-RayZer reconstructs camera poses, target-view renders, Gaussian point clouds, and turntable videos from unordered multi-view images.
     """
 
     # Use helper so theme doesn’t break older Gradio.
@@ -356,23 +402,34 @@ def build_demo(args) -> gr.Blocks:
 
 
 def main() -> None:
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", default=DEFAULT_CONFIG)
+    pre_args, _ = pre_parser.parse_known_args()
+    default_ckpt, default_output_dir = _default_paths_for_config(pre_args.config)
+    default_ckpt_help = (
+        default_ckpt
+        if _maybe_existing_checkpoint(default_ckpt)
+        else DEFAULT_CKPT
+    )
+
     parser = argparse.ArgumentParser(
-        description="Launch the E-RayZer Gradio demo"
+        description="Launch the E-RayZer Gradio demo",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--config", default=DEFAULT_CONFIG, help="Default config path"
     )
     parser.add_argument(
         "--ckpt",
-        default=DEFAULT_CKPT,
-        help="Checkpoint path or Hugging Face URL (defaults to downloading from qitaoz/E-RayZer)",
+        default=default_ckpt,
+        help=f"Checkpoint path; default downloads {default_ckpt_help} if missing",
     )
     parser.add_argument(
         "--device", default=None, help="Default device override"
     )
     parser.add_argument(
         "--output-dir",
-        default=DEFAULT_OUTPUT_ROOT,
+        default=default_output_dir,
         help="Directory for outputs and demos",
     )
     parser.add_argument(

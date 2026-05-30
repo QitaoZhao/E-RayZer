@@ -1,4 +1,5 @@
 import copy
+import math
 
 import torch
 import torch.nn as nn
@@ -122,6 +123,10 @@ class ERayZer(nn.Module):
         self.hh = self.ww = self.config.model.image_tokenizer.image_size // self.config.model.image_tokenizer.patch_size
         self.ph = self.pw = self.config.model.image_tokenizer.patch_size
         self.inference = True
+        self.freeze_focal_steps = self.config.training.get(
+            "freeze_focal_steps",
+            self.config.training.get("no_pass_steps", 0),
+        )
  
         # image tokenizer
         self.image_tokenizer = nn.Sequential(
@@ -273,20 +278,72 @@ class ERayZer(nn.Module):
 
         # training settings
         if config.inference or config.get("evaluation", False):
+            self.inference_view_selector_type = config.get("inference_view_selector_type", "even_I_B")
             if config.training.get('random_inputs', False):
                 self.random_index = True
             else:
                 self.random_index = False
         else:
+            self.inference_view_selector_type = None
             self.random_index = config.training.get('random_split', False)
         
-        print('Use random index:', self.random_index)
+    def _split_indices(self, batch_size, num_views, device):
+        num_input = int(self.config.training.num_input_views)
+        num_target = int(self.config.training.num_target_views)
+        if num_input + num_target != int(self.config.training.num_views):
+            raise ValueError("num_input_views + num_target_views must equal num_views")
 
-    def forward(self, data):
-        # input, target, input_idx, target_idx = self.split_data(data, random_index=self.random_index)
+        if self.random_index:
+            input_idx = torch.zeros((batch_size, num_input), dtype=torch.long)
+            target_idx = torch.zeros((batch_size, num_target), dtype=torch.long)
+            all_indices = torch.arange(num_views, dtype=torch.long)
+            for item_idx in range(batch_size):
+                input_idx[item_idx, 0] = 0
+                input_idx[item_idx, -1] = num_views - 1
+                remaining = torch.arange(1, num_views - 1, dtype=torch.long)
+                middle = remaining[torch.randperm(len(remaining))[: num_input - 2]]
+                input_idx[item_idx, 1:-1], _ = middle.sort()
+                keep_target = torch.ones(num_views, dtype=torch.bool)
+                keep_target[input_idx[item_idx]] = False
+                target_idx[item_idx] = all_indices[keep_target]
+            return input_idx.to(device), target_idx.to(device)
+
+        group_count = math.gcd(num_input, num_target)
+        group_size = num_views // group_count
+        in_per_group = num_input // group_count
+        target_per_group = num_target // group_count
+        input_list = []
+        target_list = []
+        for group_idx in range(group_count):
+            start = group_idx * group_size
+            block = list(range(start, start + group_size))
+            input_list.extend(block[:in_per_group])
+            target_list.extend(block[in_per_group : in_per_group + target_per_group])
+        force_last_for_eval = (
+            self.inference_view_selector_type == "even_I_B"
+            and (self.config.inference or self.config.get("evaluation", False))
+        )
+        if self.config.training.get("force_first_last_in_input", False) or force_last_for_eval:
+            last_view = num_views - 1
+            if last_view not in input_list:
+                moved = input_list.pop(-1)
+                target_list.append(moved)
+                if last_view in target_list:
+                    target_list.remove(last_view)
+                input_list.append(last_view)
+        input_idx = torch.tensor(sorted(input_list), dtype=torch.long, device=device)
+        target_idx = torch.tensor(sorted(target_list), dtype=torch.long, device=device)
+        return (
+            input_idx.unsqueeze(0).repeat(batch_size, 1),
+            target_idx.unsqueeze(0).repeat(batch_size, 1),
+        )
+
+    def forward(self, data, iter=0, create_visual=False, render_video=False):
         image_all = data['image'] * 2.0 - 1.0                                     # [b, v_all, c, h, w], range (0,1) to (-1,1)
         b, v, c, h, w = image_all.shape
         device = image_all.device
+        batch_idx = torch.arange(b, device=device).unsqueeze(1)
+        image_data_all = data["image"]
 
         # Padding input to 10 views if less than 10 views (repeat the last view)
         if v < 10:
@@ -295,6 +352,8 @@ class ERayZer(nn.Module):
             pad_views = 10 - v
             last_view = image_all[:, -1:, ...].repeat(1, pad_views, 1, 1, 1)
             image_all = torch.cat([image_all, last_view], dim=1)                   # [b, v_all, c, h, w]
+            last_image = image_data_all[:, -1:, ...].repeat(1, pad_views, 1, 1, 1)
+            image_data_all = torch.cat([image_data_all, last_image], dim=1)
         else:
             pad_input = False
             v_all = v
@@ -331,23 +390,30 @@ class ERayZer(nn.Module):
         cam_info = self.pose_predictor(cam_tokens, v_all)                 # [b*v_all, num_pose_element+3+4], rot, 3d trans, 4d fxfycxcy
         pred_c2w, pred_fxfycxcy = get_cam_se3(cam_info) # [b*v_all, 4, 4], [b*v_all, 4]
         pred_c2w = rearrange(pred_c2w, '(b v) n d -> b v n d', b=b)
-        pred_fxfycxcy = rearrange(pred_fxfycxcy, '(b v) d -> b v d', b=b).detach()
+        pred_fxfycxcy = rearrange(pred_fxfycxcy, '(b v) d -> b v d', b=b)
+        if iter < self.freeze_focal_steps:
+            pred_fxfycxcy = pred_fxfycxcy.detach()
         normalized = True
+        num_real_views = int(data.get("num_real_views", v))
+        img_tokens_all = rearrange(img_tokens, '(b v) n d -> b v n d', b=b)
+        if self.config.inference:
+            if v < int(self.config.training.num_input_views):
+                v_input = int(self.config.training.num_input_views)
+            else:
+                v_input = v
+            input_idx = torch.arange(v_input, dtype=torch.long, device=device).unsqueeze(0).repeat(b, 1)
+            target_idx = torch.arange(v, dtype=torch.long, device=device).unsqueeze(0).repeat(b, 1)
+        else:
+            input_idx, target_idx = self._split_indices(b, v_all, device)
 
         # get plucker ray and embeddings
-        if v < 5:
-            v_input = 5
-            c2w_input = pred_c2w[:, :5, ...]                                   # [b, v_input, 4, 4]
-            fxfycxcy_input = pred_fxfycxcy[:, :5, ...]                         # [b, v_input, 4]
-            img_tokens_input = rearrange(img_tokens, '(b v) n d -> b v n d', b=b)[:, :5, ...]
-        else:
-            v_input = v
-            c2w_input = pred_c2w[:, :v, ...]                                   # [b, v_input, 4, 4]
-            fxfycxcy_input = pred_fxfycxcy[:, :v, ...]                         # [b, v_input, 4]
-            img_tokens_input = rearrange(img_tokens, '(b v) n d -> b v n d', b=b)[:, :v, ...]
-
-        c2w_target = pred_c2w[:, :v]                                           # [b, v_target, 4, 4]
-        fxfycxcy_target = pred_fxfycxcy[:, :v]                                 # [b, v_target, 4]
+        c2w_input = pred_c2w[batch_idx, input_idx]                              # [b, v_input, 4, 4]
+        fxfycxcy_input = pred_fxfycxcy[batch_idx, input_idx]                    # [b, v_input, 4]
+        img_tokens_input = img_tokens_all[batch_idx, input_idx]                 # [b, v_input, n, d]
+        c2w_target = pred_c2w[batch_idx, target_idx]                            # [b, v_target, 4, 4]
+        fxfycxcy_target = pred_fxfycxcy[batch_idx, target_idx].clone()          # [b, v_target, 4]
+        target_image = image_data_all[batch_idx, target_idx]
+        v_input = input_idx.shape[1]
     
         plucker_rays_input = cam_info_to_plucker(c2w_input, fxfycxcy_input, self.config.model.target_image, normalized=normalized, return_moment=True)
         plucker_rays_input = rearrange(plucker_rays_input, '(b v) c h w -> b v h w c', b=b, v=v_input)
@@ -374,7 +440,7 @@ class ERayZer(nn.Module):
             img_aligned_gaussians,
             'b (v n) d -> b v n d',
             v=v_input,
-        )[:, :v]
+        )
         img_aligned_gaussians = rearrange(
             img_aligned_gaussians, 
             'b v n (ph pw c) -> b (v n ph pw) c', 
@@ -385,7 +451,7 @@ class ERayZer(nn.Module):
         img_aligned_xyz = rearrange(
             xyz,
             "b (v hh ww ph pw) c -> b v c (hh ph) (ww pw)",
-            v=v,
+            v=v_input,
             hh=self.hh,
             ww=self.ww,
             ph=self.ph,
@@ -395,7 +461,7 @@ class ERayZer(nn.Module):
         if self.config.model.hard_pixelalign:
             img_aligned_xyz = img_aligned_xyz.mean(dim=2, keepdim=True)
             img_aligned_xyz = self.range_func(img_aligned_xyz)
-            plucker_rays_input = cam_info_to_plucker(c2w_input[:, :v, ...], fxfycxcy_input[:, :v, ...], self.config.model.target_image, normalized=normalized, return_moment=False)
+            plucker_rays_input = cam_info_to_plucker(c2w_input, fxfycxcy_input, self.config.model.target_image, normalized=normalized, return_moment=False)
             plucker_rays_input = rearrange(plucker_rays_input, '(b v) c h w -> b v c h w', b=b)
             ray_o, ray_d = plucker_rays_input.split([3, 3], dim=2)
             img_aligned_xyz = ray_o + img_aligned_xyz * ray_d
@@ -439,9 +505,11 @@ class ERayZer(nn.Module):
             rendered_images=render.render
         )
 
-        with torch.no_grad():
-            vis_only_results = self.render_images_video(gaussian_attrs, c2w_target, fxfycxcy_target, normalized=False, step_back=self.config.get('evaluation_step_back_distance', 0))
-            # vis_only_results_input = self.render_images_video(gaussian_attrs, c2w_input, fxfycxcy_input, normalized=False)
+        vis_only_results = None
+        if create_visual or render_video or self.config.inference or self.config.get("evaluation", False):
+            with torch.no_grad():
+                vis_only_results = self.render_images_video(gaussian_attrs, c2w_target, fxfycxcy_target, normalized=False, step_back=self.config.get('evaluation_step_back_distance', 0))
+                # vis_only_results_input = self.render_images_video(gaussian_attrs, c2w_input, fxfycxcy_input, normalized=False)
 
         gaussians = []
         pixelalign_xyz = []
@@ -482,7 +550,7 @@ class ERayZer(nn.Module):
             img_aligned_xyz = rearrange(
                 img_aligned_xyz,
                 "(v hh ww ph pw) c -> v c (hh ph) (ww pw)",
-                v=v,
+                v=v_input,
                 hh=self.hh,
                 ww=self.ww,
                 ph=self.ph,
@@ -496,7 +564,8 @@ class ERayZer(nn.Module):
             ray_o=ray_o,
             gaussians=gaussians,
             pixelalign_xyz=pixelalign_xyz,
-            image=data['image'],
+            image=image_data_all,
+            target_image=target_image,
             render=render_results.rendered_images,
             c2w=pred_c2w,
             fxfycxcy=rearrange(pred_fxfycxcy, 'b v d -> (b v) d'),
@@ -504,9 +573,12 @@ class ERayZer(nn.Module):
             fxfycxcy_input=fxfycxcy_input,
             c2w_target=c2w_target,
             fxfycxcy_target=fxfycxcy_target,
+            input_idx=input_idx,
+            target_idx=target_idx,
         )
 
-        result.render_video = vis_only_results.rendered_images_video.detach().clamp(0, 1)
+        if vis_only_results is not None:
+            result.render_video = vis_only_results.rendered_images_video.detach().clamp(0, 1)
 
         return result
 
@@ -806,7 +878,6 @@ class CanonicalKHead(nn.Module):
     def forward(self, x):
         for i, layer in enumerate(self.layers):
             x = layer(x)
-            print(f"Output after layer {i} ({layer.__class__.__name__}): {x}")
         return x
 
 
@@ -823,7 +894,6 @@ class PoseEstimator(nn.Module):
         self.pose_consistency_reg_weight = self.config.training.get('pose_consistency_reg_weight', 0.0)
 
         self.pose_rep = self.config.model.pose_latent.get('representation', '6d')
-        print('Pose representation:', self.pose_rep)
         if self.pose_rep == '6d':
             self.num_pose_element = 6
         elif self.pose_rep == 'quat':

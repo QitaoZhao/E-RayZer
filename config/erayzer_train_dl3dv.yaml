@@ -1,0 +1,109 @@
+data_repeat: 100
+debug: false
+inference: false
+profile: false
+
+dataset:
+  name: dl3dv
+  # Local text file. Each non-empty line points to one processed scene JSON.
+  train_manifest_path: data/dl3dv_release/manifests/mini_train_100.txt
+  # Local root containing <scene_name>/covisibility.json labels.
+  covisibility_root: data/dl3dv_release/covisibility/dl3dv
+  # Optional local root containing <scene_name>/covisibility.json with cos_sim stats.
+  feature_similarity_root: data/dl3dv_release/dino_similarity/dl3dv
+
+model:
+  class_name: erayzer_core.model.erayzer.ERayZer
+  image_tokenizer:
+    image_size: 256
+    patch_size: 16
+    in_channels: 3
+    use_off_the_shelf: false
+  input_with_pe: true
+  target_image:
+    height: 256
+    width: 256
+  transformer:
+    d: 768
+    d_head: 64
+    encoder_n_layer: 16
+    encoder_geom_n_layer: 16
+    decoder_n_layer: 8
+    neck_n_layer: 1
+    fix_decoder: false
+    special_init: true
+    depth_init: true
+    use_qk_norm: true
+  pose_latent:
+    length: 1
+    canonical: middle
+    mode: pairwise
+  use_deferred_rendering: false
+  use_gsplat: true
+  near_plane: 0.2
+  scaling_bias: -3.0
+  scaling_max: -2.0
+  gaussians:
+    n_gaussians: 1
+    range_setting:
+      far: 8
+      near: 0
+      type: linear_depth
+    sh_degree: 3
+    upsampler:
+      upsample_factor: 1
+  gs_per_pixel_sqrt: 1
+  hard_pixelalign: true
+
+training:
+  dataset: dl3dv
+  checkpoint_dir: experiments/checkpoints/erayzer-dl3dv
+  resume_ckpt: none
+
+  batch_size_per_gpu: 24
+  num_workers: 4
+  max_fwdbwd_passes: 152000
+  checkpoint_every: 2000
+  grad_checkpoint_every: 1
+  print_every: 20
+
+  num_views: 10
+  num_all_views: 10
+  num_input_views: 5
+  num_target_views: 5
+  center_crop: true
+  random_shuffle: false
+  random_split: true
+  max_resample_tries: 200
+
+  view_selector:
+    type: covisibility
+    # scripts/train_dl3dv.sh keeps the old release defaults:
+    # covisibility final range [0.5, 1.0], feat_sim final range [0.75, 1.0].
+    key_name: avg_per_view
+    min_frame_dist: 1.0
+    max_frame_dist: 0.5
+    use_curriculum: true
+    curriculum_iter: 86000
+    curriculum_start_min_frame_dist: 1.0
+    curriculum_start_max_frame_dist: 1.0
+    sort_frames: true
+    tol: 0.05
+
+  lr: 0.0004
+  beta1: 0.9
+  beta2: 0.95
+  weight_decay: 0.05
+  warmup: 3000
+  scheduler_type: cosine
+  grad_accum_steps: 1
+  grad_clip_norm: 1.0
+  freeze_focal_steps: 200
+  no_pass_steps: 200
+  l2_loss_weight: 1.0
+  l1_loss_weight: 0.0
+  perceptual_loss_weight: 0.2
+  perceptual_loss_weight_path: weights/imagenet-vgg-verydeep-19.mat
+  use_amp: true
+  amp_dtype: bf16
+  use_tf32: true

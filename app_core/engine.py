@@ -262,21 +262,30 @@ class ERayZerEngine:
         array = (array * 255.0).round().astype("uint8")
         return Image.fromarray(array)
 
-    def _prepare_batch(self, image_files: Sequence[str]) -> Dict[str, torch.Tensor]:
-        if len(image_files) != self.num_views:
-            print(f"Warning: expected {self.num_views} views, but got {len(image_files)}; padding inputs to {self.num_views} views.")
+    def _prepare_batch(self, image_files: Sequence[str]) -> Dict[str, object]:
+        image_files = sorted(image_files, key=os.path.basename)
+        if len(image_files) == 0:
+            raise ValueError("At least one image is required for inference.")
+        if len(image_files) < self.num_views:
+            print(
+                f"Warning: expected {self.num_views} views, but got {len(image_files)}; "
+                "the model will pad internally."
+            )
+        elif len(image_files) > self.num_views:
+            print(f"Warning: expected {self.num_views} views, but got {len(image_files)}.")
 
+        num_real_views = len(image_files)
         tensors: List[torch.Tensor] = []
-        for path in sorted(image_files, key=os.path.basename):
+        for path in image_files:
             img = Image.open(path).convert("RGB")
             tensors.append(self.transform(img))
         images = torch.stack(tensors, dim=0).unsqueeze(0)
         intrinsics = torch.tensor(
-            [[[1.0, 1.0, 0.5, 0.5]] * self.num_views], dtype=torch.float32
+            [[[1.0, 1.0, 0.5, 0.5]] * num_real_views], dtype=torch.float32
         )
-        return {"image": images, "fxfycxcy": intrinsics}
+        return {"image": images, "fxfycxcy": intrinsics, "num_real_views": num_real_views}
 
-    def _move_to_device(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def _move_to_device(self, batch: Dict[str, object]) -> Dict[str, object]:
         return {
             key: value.to(self.device, non_blocking=self.device.type == "cuda") if torch.is_tensor(value) else value
             for key, value in batch.items()
@@ -297,7 +306,10 @@ class ERayZerEngine:
             with autocast_ctx:
                 result = self.model(batch_gpu)
 
-        run_dir, glb_path, video_path = self._export_outputs(result)
+        run_dir, glb_path, video_path = self._export_outputs(
+            result,
+            int(batch["num_real_views"]),
+        )
         gallery_paths = sorted(
             [os.path.join(run_dir, name) for name in os.listdir(run_dir) if name.startswith("pred_view_")]
         )
@@ -308,7 +320,7 @@ class ERayZerEngine:
         )
         return gallery_paths, archive, log, glb_path, video_path
 
-    def _export_outputs(self, result) -> Tuple[str, Optional[str], Optional[str]]:
+    def _export_outputs(self, result, num_real_views: int) -> Tuple[str, Optional[str], Optional[str]]:
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         run_dir = os.path.join(self.output_root, timestamp)
         os.makedirs(run_dir, exist_ok=True)
@@ -322,17 +334,32 @@ class ERayZerEngine:
                 img = self._tensor_to_pil(frame)
                 img.save(os.path.join(run_dir, f"pred_view_{idx:02d}.png"))
 
-        if hasattr(result, "pixelalign_xyz") is not None:
+        if getattr(result, "pixelalign_xyz", None) is not None:
             glb_path = os.path.join(run_dir, "point_cloud.glb")
 
             scene = trimesh.Scene()
-            xyzs = result.pixelalign_xyz[0].detach().cpu().permute(0, 2, 3, 1).reshape(-1, 3).numpy()
+            input_idx = getattr(result, "input_idx", None)
+            valid_input = None
+            if input_idx is not None:
+                valid_input = input_idx[0].detach().cpu() < num_real_views
+
+            pixelalign_xyz = result.pixelalign_xyz[0].detach().cpu()
+            if valid_input is not None:
+                pixelalign_xyz = pixelalign_xyz[valid_input]
+            xyzs = pixelalign_xyz.permute(0, 2, 3, 1).reshape(-1, 3).numpy()
             xyzs[:, [1, 2]] *= -1
-            rgbs = (result.image[0].detach().cpu().permute(0, 2, 3, 1).reshape(-1, 3) * 255.0).round().numpy().astype(np.uint8)
+            image_for_colors = result.image[0]
+            if input_idx is not None:
+                selected_input = input_idx[0].detach().cpu()
+                if valid_input is not None:
+                    selected_input = selected_input[valid_input]
+                image_for_colors = image_for_colors[selected_input]
+            rgbs = (image_for_colors.detach().cpu().permute(0, 2, 3, 1).reshape(-1, 3) * 255.0).round().numpy().astype(np.uint8)
             point_cloud = trimesh.points.PointCloud(vertices=xyzs, colors=rgbs)
             scene.add_geometry(point_cloud)
 
             c2ws = result.c2w[0].detach().cpu().numpy()
+            c2ws = c2ws[:num_real_views]
             num_images = c2ws.shape[0]
             cmap = plt.get_cmap("hsv")
             for i, c2w in enumerate(c2ws):
@@ -349,7 +376,7 @@ class ERayZerEngine:
 
             scene.export(glb_path)
 
-        if getattr(result, "render_video") is not None:
+        if getattr(result, "render_video", None) is not None:
             frames_dir = os.path.join(run_dir, "render_video_frames")
             os.makedirs(frames_dir, exist_ok=True)
             frames = result.render_video[0].detach().cpu().clamp(0, 1)
@@ -359,7 +386,7 @@ class ERayZerEngine:
 
             frames_np = (frames.permute(0, 2, 3, 1).numpy() * 255.0).round().astype(np.uint8)
             video_path = os.path.join(run_dir, "render_video.mp4")
-            imageio.mimwrite(video_path, frames_np, fps=24)
+            imageio.mimwrite(video_path, frames_np, fps=24, codec="libx264")
 
         return run_dir, glb_path, video_path
 

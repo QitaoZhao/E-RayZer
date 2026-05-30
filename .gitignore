@@ -4,6 +4,8 @@ temp/
 experiments/
 log/
 checkpoints/
+data/
+weights/
 minLRM/scripts
 wandb/
 .DS_Store
@@ -150,6 +152,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv*/
 env/
 venv/
 ENV/
@@ -217,3 +220,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local release/build notes and packaged artifacts
+codex/
+release_artifacts/

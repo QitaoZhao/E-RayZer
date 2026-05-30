@@ -1,7 +1,9 @@
 data_repeat: 1
 debug: false
 inference: false
+inference_checkpoint_path: checkpoints/erayzer_multi.pt
 inference_out_dir: experiments/inference/erayzer
+inference_view_selector_type: even_I_B
 model:
   class_name: erayzer_core.model.erayzer.ERayZer
   gaussians:
@@ -63,6 +65,7 @@ training:
   grad_checkpoint_every: 1
   grad_clip_norm: 1.0
   l2_loss_weight: 1.0
+  l1_loss_weight: 0.0
   lr: 0.0004
   max_fwdbwd_passes: 152000
   max_resample_tries: 200
@@ -76,6 +79,7 @@ training:
   num_views: 10
   num_workers: 4
   perceptual_loss_weight: 0.2
+  perceptual_loss_weight_path: weights/imagenet-vgg-verydeep-19.mat
   pose_consistency_reg_weight: 0.0
   prefetch_factor: 8
   print_every: 20
@@ -95,13 +99,13 @@ training:
     curriculum_iter: 86000
     curriculum_start_max_frame_dist: 1.0
     curriculum_start_min_frame_dist: 1.0
+    key_name: avg_per_view
     max_frame_dist: 0.5
     min_frame_dist: 1.0
     type: covisibility
+    sort_frames: true
     use_curriculum: true
   vis_every: 500
-  wandb_exp_name: erayzer-dl3dv
-  wandb_log_every: 50
-  wandb_offline: false
   warmup: 3000
+  scheduler_type: cosine
   weight_decay: 0.05
