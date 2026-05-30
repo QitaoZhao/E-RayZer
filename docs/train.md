@@ -66,7 +66,7 @@ train split:
 
 1. Use the included `data_splits/dl3dv/mini_train_100.txt` list to download the
    selected raw DL3DV sequences from Hugging Face with
-   `scripts/download_dl3dv_hf_list.py`.
+   `scripts/download_dl3dv_hf_sequences.py`.
 2. Convert the downloaded raw data with `scripts/convert_dl3dv_opencv_list.py`.
 3. Extract the mini-train statistics artifact from Google Drive into
    `data/dl3dv_release`.

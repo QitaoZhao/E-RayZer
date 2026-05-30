@@ -39,7 +39,7 @@ You can also set `HF_TOKEN` instead of logging in interactively.
 Download the 100-sequence mini-train split:
 
 ```bash
-python scripts/download_dl3dv_hf_list.py \
+python scripts/download_dl3dv_hf_sequences.py \
   --scene-id-list data_splits/dl3dv/mini_train_100.txt \
   --output-dir data/dl3dv_raw \
   --source all \
@@ -50,7 +50,7 @@ python scripts/download_dl3dv_hf_list.py \
 Download the full DL3DV benchmark split:
 
 ```bash
-python scripts/download_dl3dv_hf_list.py \
+python scripts/download_dl3dv_hf_sequences.py \
   --scene-id-list data_splits/dl3dv/test_full.txt \
   --output-dir data/dl3dv_raw \
   --source benchmark \
@@ -61,7 +61,7 @@ python scripts/download_dl3dv_hf_list.py \
 Optional full-training download:
 
 ```bash
-python scripts/download_dl3dv_hf_list.py \
+python scripts/download_dl3dv_hf_sequences.py \
   --scene-id-list data_splits/dl3dv/train_full.txt \
   --output-dir data/dl3dv_raw \
   --source all \

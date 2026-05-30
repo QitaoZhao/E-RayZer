@@ -291,8 +291,8 @@ def download_benchmark_files_parallel(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Download a fixed DL3DV sequence-id list from the official Hugging Face "
-            "raw images+poses release."
+            "Download raw DL3DV sequences selected by a fixed sequence-id list "
+            "from the official Hugging Face images+poses release."
         )
     )
     parser.add_argument("--scene-id-list", required=True, type=Path)
