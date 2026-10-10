@@ -69,6 +69,9 @@ We provide a minimal DL3DV training and evaluation release:
 - [Training](docs/train.md)
 - [Evaluation](docs/eval.md)
 
+[ScanNet++ and BlendedMVS benchmark lists](docs/eval.md#scannet-and-blendedmvs)
+are also available.
+
 The code here is a re-implementation and differs from the original version
 developed at Adobe.
 

@@ -72,3 +72,17 @@ basename,mse,psnr,RPA@5,RPA@15,RPA@30
 ```
 
 `RPA` is the relative pose accuracy metric at the listed degree thresholds.
+
+## ScanNet++ and BlendedMVS
+
+The paper uses benchmark subsets targeting approximately 10% of eligible
+sequences. Use these fixed lists to reproduce the benchmark selection:
+
+- [ScanNet++](../data_splits/scannetpp/scannetpp_depth_benchmark.txt): 95 sequences with depth.
+- [BlendedMVS](../data_splits/blendedmvs/blendedmvs_depth_benchmark.txt): 51 sequences, including the original benchmark split.
+
+Each entry is a processed sequence directory name; map it to your local data.
+Re-sampling may produce a different subset and change the results.
+
+[Preparation scripts](../scripts/benchmark_protocols/README.md) are provided for
+reference. The evaluation commands above support DL3DV only.
