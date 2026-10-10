@@ -129,6 +129,28 @@ The same file is available from
 This artifact contains only JSON statistics for the 100 mini-train sequences.
 It does not contain DL3DV images.
 
+### Computing Curriculum Statistics
+
+[`compute_covisibility.py`](../scripts/compute_covisibility.py) samples 10 triplets
+per interval from the converted manifest:
+
+- **UFM:** average middle-to-neighbor pixel coverage above `0.5` (`avg_per_view`). Requires UFM and its checkpoint.
+- **DINOv2:** average cosine similarity of neighboring global features (`cos_sim`), using DINOv2 normalization and 224 × 224 inputs. Weights download automatically.
+
+```bash
+python scripts/compute_covisibility.py \
+  --manifest-path data/dl3dv_release/manifests/mini_train_100.txt \
+  --checkpoint /path/to/ufm_560_base.pt \
+  --intervals 1 5 10 15 20 25 \
+  --output-root data/dl3dv_release/covisibility/dl3dv
+
+python scripts/compute_covisibility.py --mode dino \
+  --manifest-path data/dl3dv_release/manifests/mini_train_100.txt \
+  --output-root data/dl3dv_release/dino_similarity/dl3dv
+```
+
+Both modes write `<scene_name>/covisibility.json`.
+
 ## 5. Validate
 
 Validate the mini-train manifest:
